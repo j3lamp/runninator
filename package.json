@@ -1,0 +1,17 @@
+{
+  "name": "dev-server",
+  "version": "0.0.1",
+  "description": "A generic front end for a front-end hot reload server and application server.",
+  "main": "index.js",
+  "scripts": {
+    "output": "./outputs.sh",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "1.1.3",
+    "ramda": "^0.21.0",
+    "string": "^3.3.1"
+  }
+}
