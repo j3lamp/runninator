@@ -70,7 +70,7 @@ const output = scopedAction(
 
 function createDataHandler(name, color, error)
 {
-    const name_color = error ? chalk.red  : color;
+    const name_color = error ? chalk.red.bold  : color;
 
     let partial_out = null;
     return function handleData(data)
@@ -109,11 +109,14 @@ function createDataHandler(name, color, error)
     };
 }
 
-function createChild(name, display_name, color, command, args)
+function createChild(name, display_name, color, command, args, quiet)
 {
-    output(function(out) {
-        out.writeLine("Starting " + color(name) + "...");
-    });
+    if (!quiet)
+    {
+        output(function(out) {
+            out.writeLine("Starting " + color(name) + "...");
+        });
+    }
 
     commands[name].status = RUNNING;
     let child = child_process.spawn(command, args);
@@ -137,7 +140,15 @@ function createChild(name, display_name, color, command, args)
     child.on("close", function(code) {
         if (!code || 0 === code)
         {
-            commands[name].status = COMPLETED;
+            if (commands[name]['stopping'])
+            {
+                commands[name].status = STOPPED;
+                commands[name].stopping = false;
+            }
+            else
+            {
+                commands[name].status = COMPLETED;
+            }
         }
         else
         {
@@ -171,12 +182,57 @@ function createChild(name, display_name, color, command, args)
                                                  display_name,
                                                  color,
                                                  command,
-                                                 args);
+                                                 args,
+                                                 true);
             commands[name].restart = false;
         }
     });
 
     return child;
+}
+
+
+function printHelp(out)
+{
+    let help = [
+        "Control Commands:",
+        "    start <command name>    Start a stopped command.",
+        "    stop <command name>     Stop a running command.",
+        "    restart <command name>  Restart a running command.",
+        "",
+        "  Note: Control commands and command names can be entered in reverse order.",
+        "        The special command names 'all' and '*' can be used to control all the",
+        "        commands together.",
+        "",
+        "Global Control Commands:",
+        "    status  Print the status of all commands.",
+        "    quit    Stop all commands and quit this.",
+        "    help    Print this help."];
+
+    let first_command = true;
+    for (let entry of R.values(commands))
+    {
+        if (first_command)
+        {
+            help.push("");
+            help.push("Commands:");
+
+            first_command = false;
+        }
+
+        let entry_help = ("    " + entry.color(entry.display_name) + "  " +
+                          entry.command);
+        if (entry["args"] && entry.args.length > 0)
+        {
+            entry_help += " " + entry.args.join(" ");
+        }
+        help.push(entry_help);
+    }
+
+    for (let line of help)
+    {
+        out.writeLine(line);
+    }
 }
 
 
@@ -196,20 +252,19 @@ function printStatus(out)
 }
 
 let quitting = false;
-function quit()
+function quit(out)
 {
     quitting = true;
 
     let running_process = false;
-    R.forEach(function(entry)
-              {
-                  if (entry.process)
-                  {
-                      entry.process.kill();
-                      running_process = true;
-                  }
-              },
-              R.values(commands));
+    for (let name in commands)
+    {
+        if (commands[name].process)
+        {
+            control_commands.stop(out, name);
+            running_process = true;
+        }
+    }
 
     if (!running_process)
     {
@@ -239,6 +294,7 @@ const control_commands = {
         if (entry.process)
         {
             out.writeLine("Stopping " + entry.color(name) + "...");
+            entry.stopping = true;
             entry.process.kill();
         }
         else
@@ -284,22 +340,26 @@ process.stdout.on("data", function(data) {
                 // No input, do nothing.
                 valid = true;
             }
-            else if ("q" === command || "quit" === command)
+            else if ("quit" === command)
             {
                 quit(out);
                 valid = true;
             }
-            else if ("s" === command || "status" === command)
+            else if ("status" === command)
             {
                 printStatus(out);
                 valid = true;
             }
-            // add help at some point
+            else if ("help" === command)
+            {
+                printHelp(out);
+                valid = true;
+            }
         }
         else if (2 == input.length)
         {
             let control_command = null;
-            let command_name    = null;
+            let command_names   = null;
 
             let name_index = 1;
             if (control_commands[input[0]])
@@ -312,16 +372,30 @@ process.stdout.on("data", function(data) {
                 name_index = 0;
             }
 
-            command_name = input[name_index];
-            if (!commands[command_name])
+            if (input[name_index])
             {
-                command_name = false;
+                if ("all" === input[name_index] ||
+                    "*"   === input[name_index])
+                {
+                    command_names = Object.keys(commands);
+                }
+                else if (commands[input[name_index]])
+                {
+                    command_names = [input[name_index]];
+                }
+                else
+                {
+                    out.errorLine("Command '" + input[name_index] + "' does not exist.");
+                }
             }
 
-            if (control_command && command_name)
+            if (control_command && command_names)
             {
-                control_command(out, command_name);
-                valid = true;
+                for (let command_name of command_names)
+                {
+                    control_command(out, command_name);
+                    valid = true;
+                }
             }
         }
 
