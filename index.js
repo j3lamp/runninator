@@ -1,6 +1,7 @@
 "use strict";
 
 const child_process = require("child_process");
+const path          = require("path");
 
 const chalk = require("chalk");
 const R     = require("ramda");
@@ -408,29 +409,103 @@ process.stdout.on("data", function(data) {
 });
 
 
-const commands = {test: {color:    chalk.cyan,
-                         command:  "npm",
-                         args:     ["run", "output"]},
-                  bad:   {color:   chalk.magenta,
-                          command: "npm",
-                          args:    ["run", "nonexistent"]}};
-const max_name_length = R.reduce(
-    function(length, key){ return Math.max(length,key.length); },
-    0,
-    R.keys(commands));
+let colors = {
+    "green":   0,
+    "blue":    0,
+    "cyan":    0,
+    "magenta": 0,
+    "yellow":  0
+};
 
-for (let name in commands)
-{
-    let entry = commands[name];
 
-    entry.display_name = S(name).padRight(max_name_length, " ").s;
-    entry.process = createChild(name,
-                                entry.display_name,
-                                entry.color,
-                                entry.command,
-                                entry.args);
-}
+let commands = {};
+
 
 output(function(out) {
-    // Perhaps print a startup message...
+    if (process.argv.length != 3) // node <this script> <config>
+    {
+        out.errorLine(chalk.bold.red("Error") + ": One command line " +
+                      "argument required: configuration script.");
+        process.exit(1);
+    }
+    const config = require(path.resolve(process.cwd(), process.argv[2]));
+
+
+    let valid = true;
+    let max_name_length = 0;
+    for (const name in config)
+    {
+        const entry = config[name];
+
+        max_name_length = Math.max(max_name_length ,name.length);
+
+        let color;
+        if ("color" in entry && entry.color in colors)
+        {
+            color = entry.color;
+        }
+        else
+        {
+            let next_color = "";
+            let next_count = -1;
+            for (let c in colors)
+            {
+                if (-1 === next_count || colors[c] < next_count)
+                {
+                    next_color = c;
+                    next_count = colors[c];
+                }
+            }
+            color = next_color;
+        }
+        colors[color] += 1;
+        color = chalk[color];
+
+        let command;
+        let args = [];
+        if ("command" in entry)
+        {
+            if (Array.isArray(entry.command))
+            {
+                command = entry.command[0];
+                args    = entry.command.slice(1);
+            }
+            else
+            {
+                command = entry.command;
+            }
+
+            commands[name] = {color:    color,
+                              command:  command,
+                              args:     args,
+                              process:  null,
+                              status:   STOPPED,
+                              stopping: false,
+                              restart:  false};
+        }
+        else
+        {
+            out.errorLine(chalk.bold.red("Error:") + " configuration enttry '" +
+                          name + "' does not have a 'command' entry, " +
+                          "which is required.");
+            valid = false;
+            continue;
+        }
+    }
+    for (let name in commands)
+    {
+        commands[name].display_name = S(name).padRight(max_name_length, " ").s;
+    }
+
+    if (valid)
+    {
+        for (let name in commands)
+        {
+            control_commands.start(out, name);
+        }
+    }
+    else
+    {
+        process.exit(2);
+    }
 });
